@@ -18,7 +18,7 @@ import org.dspace.pack.mets.*;
 
 /**
  * PackerFactory mints packers for specified object types. Packer implementation
- * is based on a configurable property (packer.pkgtype). Currently, only 
+ * is based on a configurable property (packer.pkgtype). Currently, only
  * LC METS-based ("mets") and Bagit-based ("bagit") package formats are supported.
  *
  * @author richardrodgers
@@ -35,17 +35,17 @@ public class PackerFactory
     public static final String OTHER_IDS = "otherIds";
     public static final String CREATE_TS = "created";
     public static final String WITHDRAWN  = "withdrawn";
-    
+
     // type of package to use - must be either 'mets' or 'bagit'
-    private static String packType = 
+    private static String packType =
             ConfigurationManager.getProperty("replicate", "packer.pkgtype");
     // type of archive format - supported types are 'zip' or 'tgz'
-    private static String archFmt = 
+    private static String archFmt =
             ConfigurationManager.getProperty("replicate", "packer.archfmt");
     // content filter - comma separated list of bundle names
-    private static String cfgFilter = 
+    private static String cfgFilter =
             ConfigurationManager.getProperty("replicate", "packer.cfilter");
-    
+
     // cached instance of METSPacker - because a little expensive to create
     private static METSPacker metsPacker = null;
 
@@ -85,7 +85,7 @@ public class PackerFactory
         {
             packer = new CommunityPacker((Community)dso, archFmt);
         }
-        else 
+        else
         {
             throw new RuntimeException("No packer for object type");
         }

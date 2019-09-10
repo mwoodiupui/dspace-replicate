@@ -7,8 +7,8 @@
  */
 package org.dspace.pack.bagit;
 
-import java.io.FileFilter;
 import java.io.File;
+import java.io.FileFilter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.sql.SQLException;
@@ -35,15 +35,15 @@ import static org.dspace.pack.PackerFactory.*;
  */
 public class ItemPacker implements Packer
 {
-    private ItemService itemService = ContentServiceFactory.getInstance().getItemService();
-    private BundleService bundleService = ContentServiceFactory.getInstance().getBundleService();
-    private BitstreamService bitstreamService = ContentServiceFactory.getInstance().getBitstreamService();
+    private final ItemService itemService = ContentServiceFactory.getInstance().getItemService();
+    private final BundleService bundleService = ContentServiceFactory.getInstance().getBundleService();
+    private final BitstreamService bitstreamService = ContentServiceFactory.getInstance().getBitstreamService();
 
     private Item item = null;
     private String archFmt = null;
-    private List<String> filterBundles = new ArrayList<String>();
+    private List<String> filterBundles = new ArrayList<>();
     private boolean exclude = true;
-    private List<RefFilter> refFilters = new ArrayList<RefFilter>();
+    private final List<RefFilter> refFilters = new ArrayList<>();
 
     public ItemPacker(Item item, String archFmt)
     {
@@ -133,7 +133,7 @@ public class ItemPacker implements Packer
                     writer.writeValue("sequence_id", seqId);
                     if (bs.getID() == primaryId)
                     {
-                       writer.writeValue("bundle_primary", "true"); 
+                       writer.writeValue("bundle_primary", "true");
                     }
                     writer.endStanza();
                     writer.close();
@@ -142,12 +142,13 @@ public class ItemPacker implements Packer
                     if (url != null)
                     {
                         // add reference to bag
-                        bag.addDataRef(relPath + seqId, bs.getSize(), url);
+                        bag.addDataRef(relPath + seqId, bs.getSizeBytes(), url);
                     }
                     else
                     {
                         // add bytes to bag
-                        bag.addData(relPath + seqId, bs.getSize(), bitstreamService.retrieve(Curator.curationContext(), bs));
+                        bag.addData(relPath + seqId, bs.getSizeBytes(),
+                                bitstreamService.retrieve(Curator.curationContext(), bs));
                     }
                 }
             }
@@ -260,18 +261,18 @@ public class ItemPacker implements Packer
             {
                 for (Bitstream bs : bundle.getBitstreams())
                 {
-                    size += bs.getSize();
+                    size += bs.getSizeBytes();
                 }
             }
         }
         return size;
     }
-    
+
     @Override
-    public void setContentFilter(String filter) 
+    public void setContentFilter(String filter)
     {
         //If our filter list of bundles begins with a '+', then this list
-        // specifies all the bundles to *include*. Otherwise all 
+        // specifies all the bundles to *include*. Otherwise all
         // bundles *except* the listed ones are included
         if(filter.startsWith("+"))
         {
@@ -279,7 +280,7 @@ public class ItemPacker implements Packer
             //remove the preceding '+' from our bundle list
             filter = filter.substring(1);
         }
-        
+
         filterBundles = Arrays.asList(filter.split(","));
     }
 
@@ -304,7 +305,7 @@ public class ItemPacker implements Packer
         for (RefFilter filter : refFilters)
         {
             if (filter.bundle.equals(bundle.getName()) &&
-                filter.size == bs.getSize())
+                filter.size == bs.getSizeBytes())
             {
                 return filter.url;
             }
