@@ -1,4 +1,6 @@
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
     <groupId>org.dspace</groupId>
     <artifactId>dspace-replicate</artifactId>
@@ -24,6 +26,8 @@
         <dspace.version>[6.0,7.0)</dspace.version>
         <!-- DuraCloud Version Information (supported version of DuraCloud) -->
         <duracloud.version>4.2.5</duracloud.version>
+	<!-- Amazon AWS SDK version (for APTrust support -->
+	<amazon.sdk.version>2.8.3</amazon.sdk.version>
     </properties>
 
     <build>
@@ -34,8 +38,8 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.1</version>
                 <configuration>
-                  <source>1.7</source>
-                  <target>1.7</target>
+                  <source>1.8</source>
+                  <target>1.8</target>
                 </configuration>
             </plugin>
             <plugin>
@@ -128,6 +132,17 @@
                  <artifactId>logback-classic</artifactId>
                 </exclusion>
             </exclusions>
+        </dependency>
+
+        <dependency>
+          <groupId>software.amazon.awssdk</groupId>
+          <artifactId>s3</artifactId>
+          <version>${amazon.sdk.version}</version>
+        </dependency>
+        <dependency>
+          <groupId>software.amazon.awssdk</groupId>
+          <artifactId>auth</artifactId>
+          <version>${amazon.sdk.version}</version>
         </dependency>
     </dependencies>
 </project>
