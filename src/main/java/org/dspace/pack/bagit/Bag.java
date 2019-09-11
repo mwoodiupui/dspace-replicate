@@ -59,15 +59,16 @@ import static javax.xml.stream.XMLStreamConstants.*;
  * to the bag: (1) A 'flat' reader and writer for line-oriented character
  * data, (2) an 'xml' reader and writer for XML documents, and (3) a 'raw'
  * stream-based reader and writer for uninterpreted binary data.
- * 
+ *
  * The bag also can serialize itself to a compressed archive file (supported
- * formats zip or tgz) or be deserialized from same or a stream, 
+ * formats zip or tgz) or be deserialized from same or a stream,
  * abiding by the serialization recommendations of the specification.
- * 
+ *
  * @author richardrodgers
  */
 public class Bag {
-    private static ConfigurationService configurationService = DSpaceServicesFactory.getInstance().getConfigurationService();
+    private static final ConfigurationService configurationService
+            = DSpaceServicesFactory.getInstance().getConfigurationService();
 
     // coding constants
     private static final String ENCODING = "UTF-8";
@@ -81,8 +82,8 @@ public class Bag {
     private static final String DECL_FILE = "bagit.txt";
     private static final String REF_FILE = "fetch.txt";
 
-    private XMLInputFactory inFactory = XMLInputFactory.newInstance();
-    private XMLOutputFactory outFactory = XMLOutputFactory.newInstance();
+    private final XMLInputFactory inFactory = XMLInputFactory.newInstance();
+    private final XMLOutputFactory outFactory = XMLOutputFactory.newInstance();
 
     private FlatWriter tagWriter = null;
     private FlatWriter manWriter = null;
@@ -102,8 +103,8 @@ public class Bag {
      * (3) file exists and is not a directory - assume it to be a compressed
      *     archive of a bag. Explode the archive and create a filled bag in
      *     the same directory as the archive file.
-     * 
-     * @param baseFile File
+     *
+     * @param baseFile the bag directory in storage, or the archived bag to be expanded.
      * @throws IOException if I/O error
      */
     public Bag(File baseFile) throws IOException
@@ -137,9 +138,14 @@ public class Bag {
                 tagWriter = new FlatWriter(bagFile(TAGMANIF_FILE), null, null);
                 manWriter = new FlatWriter(bagFile(MANIF_FILE), null, tagWriter);
             }
-        } 
+        }
     }
 
+    /**
+     * The implemented version of the BagIt specification.
+     *
+     * @return BagIt version.
+     */
     public static String getVersion()
     {
         return BAGIT_VSN;
@@ -193,6 +199,15 @@ public class Bag {
         return dFile.exists() ? new FileInputStream(dFile) : null;
     }
 
+    /**
+     * Copy the content of a stream into the bag's data directory.  The content
+     * is digested and the checksum added to the manifest.
+     *
+     * @param relPath path to the file within the bag (relative to the data directory).
+     * @param size not used.
+     * @param is the stream to be copied.
+     * @throws IOException passed through.
+     */
     public void addData(String relPath, long size, InputStream is) throws IOException
     {
         if (filled)
@@ -229,7 +244,7 @@ public class Bag {
         String brPath = "data/" + relPath;
         refWriter.writeLine(url + " " + size + " " + brPath);
     }
-    
+
     public List<File> listDataFiles() throws IOException
     {
        return Arrays.asList(bagFile("data").listFiles());
@@ -251,6 +266,12 @@ public class Bag {
         return refList;
     }
 
+    /**
+     * Complete the bag's structure in storage and close all files.
+     * The bag is marked "filled".  It may now be archived or used as-is.
+     *
+     * @throws IOException passed through.
+     */
     public void close() throws IOException
     {
         if (! filled)
@@ -272,6 +293,9 @@ public class Bag {
         }
     }
 
+    /**
+     * Delete the bag directory and all of its content.  Reset the bag to not filled.
+     */
     public void empty()
     {
         // just delete everything
@@ -280,6 +304,10 @@ public class Bag {
         filled = false;
     }
 
+    /**
+     * Recursively delete a directory and all its content.
+     * @param dirFile path of the directory to delete.
+     */
     private void deleteDir(File dirFile)
     {
        for (File file : dirFile.listFiles())
@@ -291,19 +319,44 @@ public class Bag {
            file.delete();
        }
     }
-    
+
+    /**
+     * Archive and compress this bag in place (in current directory) using
+     * default archive format.
+     *
+     * @return abstract path to the archived bag.
+     * @throws IOException passed through.
+     */
     public File deflate() throws IOException
     {
-        // deflate this bag inplace (in current directory) using default archive format
         return deflate(baseDir.getParent(), DFLT_FMT);
     }
-    
+
+    /**
+     * Archive and compress this bag in place (in current directory) using given
+     * archive format.
+     *
+     * @param fmt must be "zip" (ZIP archive) or "tgz" (gzipped 'tar' archive),
+     *              or else nothing happens.
+     * @return abstract path to the archived bag.
+     * @throws IOException passed through.
+     */
     public File deflate(String fmt) throws IOException
     {
-        // deflate this bag inplace (in current directory) using given archive format
-        return deflate(baseDir.getParent(), fmt);        
+        return deflate(baseDir.getParent(), fmt);
     }
-    
+
+    /**
+     * Archive and compress this bag into a given directory using a given
+     * archive format.  The archive's name will be the name of the current
+     * directory with ".zip" or ".tgz" appended.
+     *
+     * @param destDir the archive is written in this directory.
+     * @param fmt must be "zip" (ZIP archive) or "tgz" (gzipped 'tar' archive),
+     *              or else nothing happens.
+     * @return abstract path to the archived bag.
+     * @throws IOException passed through.
+     */
     public File deflate(String destDir, String fmt) throws IOException
     {
         File defFile = new File(destDir, baseDir.getName() + "." + fmt);
@@ -312,7 +365,16 @@ public class Bag {
         fout.close();
         return defFile;
     }
-    
+
+    /**
+     * Archive and compress this bag to a given stream using a given archive
+     * format.
+     *
+     * @param out the archive is written to this stream.
+     * @param fmt must be "zip" (ZIP archive) or "tgz" (gzipped 'tar' archive),
+     *              or else nothing happens.
+     * @throws IOException passed through.
+     */
     public void deflate(OutputStream out, String fmt) throws IOException
     {
         if (! filled)
@@ -324,7 +386,7 @@ public class Bag {
             ZipOutputStream zout = new ZipOutputStream(
                                    new BufferedOutputStream(out));
             fillZip(baseDir, baseDir.getName(), zout);
-            zout.close(); 
+            zout.close();
         }
         else if ("tgz".equals(fmt))
         {
@@ -332,16 +394,16 @@ public class Bag {
                                           new BufferedOutputStream(
                                           new GzipCompressorOutputStream(out)));
             fillArchive(baseDir, baseDir.getName(), tout);
-            tout.close(); 
+            tout.close();
         }
     }
-    
+
     public final void inflate() throws IOException
     {
         // assume current directory & default format
         inflate(baseDir.getParent() + File.separator + baseDir.getName() + "." + DFLT_FMT);
     }
-    
+
     public void inflate(String archFile) throws IOException
     {
         String fmt = archFile.substring(archFile.lastIndexOf(".") + 1);
@@ -349,7 +411,7 @@ public class Bag {
         inflate(in, fmt);
         in.close();
     }
-    
+
     public void inflate(InputStream in, String fmt) throws IOException
     {
         if (filled)
@@ -383,11 +445,11 @@ public class Bag {
                 Utils.copy(tin, fout);
                 fout.close();
             }
-            tin.close();                                 
+            tin.close();
         }
         filled = true;
     }
-    
+
     private void fillArchive(File dirFile, String relBase, ArchiveOutputStream out) throws IOException
     {
         for (File file : dirFile.listFiles())
@@ -433,6 +495,12 @@ public class Bag {
         }
     }
 
+    /**
+     * Create an abstract path to a file in the bag's 'data' directory.
+     *
+     * @param name relative path from 'data' to the file.
+     * @return abstract path to the file.
+     */
     private File dataFile(String name)
     {
         // all user-defined files live in payload area - ie. under 'data'
@@ -446,6 +514,12 @@ public class Bag {
         return dataFile;
     }
 
+    /**
+     * Create an abstract path to a file in the bag directory.
+     *
+     * @param name relative path within the bag.
+     * @return abstract path to the file.
+     */
     private File bagFile(String name)
     {
         return new File(baseDir, name);
