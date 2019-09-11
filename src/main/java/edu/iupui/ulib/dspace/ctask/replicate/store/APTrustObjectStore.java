@@ -5,24 +5,20 @@
  *
  * http://www.dspace.org/license/
  */
-package org.dspace.ctask.replicate.store;
+package edu.iupui.ulib.dspace.ctask.replicate.store;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.URI;
-import java.net.URISyntaxException;
+import java.nio.file.Files;
 import java.util.HashMap;
 import java.util.Map;
-import org.apache.http.client.methods.CloseableHttpResponse;
-import org.apache.http.client.methods.HttpGet;
-import org.apache.http.client.utils.URIBuilder;
-import org.apache.http.impl.client.CloseableHttpClient;
-import org.apache.http.impl.client.HttpClients;
 
 import org.dspace.ctask.replicate.ObjectStore;
 import org.dspace.curate.Utils;
+import org.dspace.pack.bagit.Bag;
 import org.dspace.services.ConfigurationService;
 import org.dspace.services.factory.DSpaceServicesFactory;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
@@ -33,27 +29,26 @@ import software.amazon.awssdk.awscore.exception.AwsServiceException;
 import software.amazon.awssdk.core.exception.SdkClientException;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.model.PutObjectResponse;
 
 /**
  * Store and retrieve objects at APTrust using the AWS S3 RESTful web service.
- * Based on {@link DuraCloudObjectStore}.
+ * Based on {@link org.dspace.ctask.replicate.store.DuraCloudObjectStore}.
  *
  * @author Mark H. Wood
  */
-public class APTrustObjectStore implements ObjectStore
-{
+public class APTrustObjectStore implements ObjectStore {
     private final ConfigurationService configurationService
             = DSpaceServicesFactory.getInstance().getConfigurationService();
 
-    // AWS S3 bucket for staging to APTrust.
+    /** AWS S3 bucket for staging to APTrust. */
     private String bucket;
 
-    // AWS S3 store.
+    /** AWS S3 store. */
     private S3Client store = null;
 
     @Override
-    public void init() throws IOException
-    {
+    public void init() throws IOException {
         bucket = configurationService.getProperty("aptrust.aws.bucket");
 
         // locate & login to S3 bucket.
@@ -61,7 +56,8 @@ public class APTrustObjectStore implements ObjectStore
                 = configurationService.getProperty("aptrust.aws.access-key");
         String secretAccessKey
                 = configurationService.getProperty("aptrust.aws.secret-access-key");
-        AwsCredentials awsCredentials = AwsBasicCredentials.create(accessKey, secretAccessKey);
+        AwsCredentials awsCredentials
+                = AwsBasicCredentials.create(accessKey, secretAccessKey);
         AwsCredentialsProvider acp
                 = StaticCredentialsProvider.create(awsCredentials);
 
@@ -71,11 +67,15 @@ public class APTrustObjectStore implements ObjectStore
     }
 
     @Override
-    public long fetchObject(String group, String id, File file) throws IOException
-    {
+    public long fetchObject(String group, String id, File file)
+            throws IOException {
         long size = 0L;
-        try
-        {
+
+        // Request retrieval.
+        // Await completion of retrieval.
+        // Fetch retrieved object.
+
+        try {
              // DEBUG REMOVE
             long start = System.currentTimeMillis();
             Content content = store.getContent(getSpaceID(group), getContentPrefix(group) + id);
@@ -102,8 +102,7 @@ public class APTrustObjectStore implements ObjectStore
     }
 
     @Override
-    public boolean objectExists(String group, String id) throws IOException
-    {
+    public boolean objectExists(String group, String id) throws IOException {
         try {
             return store.getContentProperties(getSpaceID(group), getContentPrefix(group) + id) != null;
         } catch (NotFoundException nfE) {
@@ -114,8 +113,7 @@ public class APTrustObjectStore implements ObjectStore
     }
 
     @Override
-    public long removeObject(String group, String id) throws IOException
-    {
+    public long removeObject(String group, String id) throws IOException {
         // get metadata before blowing away
         long size = 0L;
         try {
@@ -131,33 +129,30 @@ public class APTrustObjectStore implements ObjectStore
     }
 
     @Override
-    public long transferObject(String group, File file) throws IOException
-    {
+    public long transferObject(String group, File file) throws IOException {
+        // build bag
+        File bagDir = Files.createTempDirectory(null).toFile();
+        Bag myBag = new Bag(bagDir);
+        myBag.addData("", file.length(), new FileInputStream(file));
+        myBag.close();
+        File bagFile = File.createTempFile("APT", ".tgz");
+        myBag.deflate(bagFile.getAbsolutePath(), "tgz");
+        myBag.empty();
+
+        // Send it to our S3 bucket.
         long size = 0L;
         String chkSum = Utils.checksum(file, "MD5");
-        // make sure this is a different file from what replica store has
-        // to avoid network I/O tax
-        try {
-            Map<String, String> attrs = store.getContentProperties(getSpaceID(group),
-                    getContentPrefix(group) + file.getName());
-            if (! chkSum.equals(attrs.get(ContentStore.CONTENT_CHECKSUM)))
-            {
-                size = uploadReplica(group, file, chkSum);
-            }
-        } catch (NotFoundException nfE) {
-            // no extant replica - proceed
-            size = uploadReplica(group, file, chkSum);
-        } catch (ContentStoreException csE) {
-            throw new IOException(csE);
-        }
-        // delete staging file
+        size = uploadReplica(group, file, chkSum);
+
+        // delete staging files
+        bagFile.delete();
         file.delete();
+
         return size;
     }
 
     @Override
-    public long moveObject(String srcGroup, String destGroup, String id) throws IOException
-    {
+    public long moveObject(String srcGroup, String destGroup, String id) throws IOException {
         // get file-size metadata before moving the content
         long size = 0L;
         try {
@@ -175,22 +170,17 @@ public class APTrustObjectStore implements ObjectStore
     }
 
     @Override
-    public String objectAttribute(String group, String id, String attrName) throws IOException
-    {
+    public String objectAttribute(String group, String id, String attrName)
+            throws IOException {
         try {
             Map<String, String> attrs = store.getContentProperties(getSpaceID(group),
                     getContentPrefix(group) + id);
 
-            if ("checksum".equals(attrName))
-            {
+            if ("checksum".equals(attrName)) {
                 return attrs.get(ContentStore.CONTENT_CHECKSUM);
-            }
-            else if ("sizebytes".equals(attrName))
-            {
+            } else if ("sizebytes".equals(attrName)) {
                 return attrs.get(ContentStore.CONTENT_SIZE);
-            }
-            else if ("modified".equals(attrName))
-            {
+            } else if ("modified".equals(attrName)) {
                 return attrs.get(ContentStore.CONTENT_MODIFIED);
             }
             return null;
@@ -201,9 +191,20 @@ public class APTrustObjectStore implements ObjectStore
         }
     }
 
+    /**
+     * Transmit a file to S3 for staging into APTrust.  The file is NOT
+     * preserved when this method returns -- you must monitor the APTrust member
+     * API events collection to determine its status.
+     *
+     * @param group purpose of the file.
+     * @param file the file to be staged.
+     * @param chkSum a checksum of the content of the file, added to the S3
+     *                  object as the metadata field "checksum".
+     * @return length of the file.
+     * @throws IOException
+     */
     private long uploadReplica(String group, File file, String chkSum)
-            throws IOException
-    {
+            throws IOException {
         try {
             String mimeType = "application/octet-stream";
             if (file.getName().endsWith(".zip")) {
@@ -224,7 +225,7 @@ public class APTrustObjectStore implements ObjectStore
                     .contentType(mimeType)
                     .metadata(metadata)
                     .build();
-            store.putObject(putObjectRequest, file.toPath());
+            PutObjectResponse response = store.putObject(putObjectRequest, file.toPath());
 
             return file.length();
         } catch (AwsServiceException | SdkClientException e) {
@@ -245,46 +246,5 @@ public class APTrustObjectStore implements ObjectStore
                 .append('/')
                 .append(file.getName())
                 .toString();
-    }
-
-    class APTrustSession {
-        private final URI baseURI;
-        private final String user;
-        private final String secret;
-        CloseableHttpClient httpClient;
-
-        APTrustSession(URI baseURI, String user, String secret) {
-            this.baseURI = baseURI;
-            this.user = user;
-            this.secret = secret;
-
-            httpClient = HttpClients.createDefault();
-        }
-
-        boolean isExists(String institution, String bagName) {
-            URI uri;
-            try {
-                uri = new URIBuilder(baseURI.resolve("objects"))
-                        .addParameter("identifier", makeIdentifier(institution, bagName))
-                        .build();
-            } catch (URISyntaxException ex) {
-                // FIXME handle exception
-                return false;
-            }
-            HttpGet request = new HttpGet(uri);
-            request.addHeader("X-Pharos-API-User", user);
-            request.addHeader("X-Pharos-API-Key", secret);
-            try ( CloseableHttpResponse response = httpClient.execute(request); ) {
-                InputStream responseContent = response.getEntity().getContent();
-                // TODO interpret response
-            } catch (IOException ex) {
-                // TODO handle exception
-            }
-            return false; // FIXME real answer
-        }
-
-        private String makeIdentifier(String institution, String bagName) {
-            return null; // FIXME real answer
-        }
     }
 }
