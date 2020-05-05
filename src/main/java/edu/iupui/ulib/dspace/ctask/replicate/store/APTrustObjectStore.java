@@ -8,17 +8,37 @@
 package edu.iupui.ulib.dspace.ctask.replicate.store;
 
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.FileWriter;
 import java.io.IOException;
-import java.io.InputStream;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.security.NoSuchAlgorithmException;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 
+import gov.loc.repository.bagit.domain.Bag;
+import gov.loc.repository.bagit.domain.Manifest;
+import gov.loc.repository.bagit.domain.Metadata;
+import gov.loc.repository.bagit.domain.Version;
+import gov.loc.repository.bagit.hash.Hasher;
+import gov.loc.repository.bagit.hash.StandardSupportedAlgorithms;
+import gov.loc.repository.bagit.hash.SupportedAlgorithm;
+import gov.loc.repository.bagit.writer.BagWriter;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.Arrays;
+import java.util.List;
+import org.apache.commons.compress.archivers.ArchiveEntry;
+import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
 import org.dspace.ctask.replicate.ObjectStore;
 import org.dspace.curate.Utils;
-import org.dspace.pack.bagit.Bag;
 import org.dspace.services.ConfigurationService;
 import org.dspace.services.factory.DSpaceServicesFactory;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
@@ -37,7 +57,8 @@ import software.amazon.awssdk.services.s3.model.PutObjectResponse;
  *
  * @author Mark H. Wood
  */
-public class APTrustObjectStore implements ObjectStore {
+public class APTrustObjectStore
+        implements ObjectStore {
     private final ConfigurationService configurationService
             = DSpaceServicesFactory.getInstance().getConfigurationService();
 
@@ -75,34 +96,27 @@ public class APTrustObjectStore implements ObjectStore {
         // Await completion of retrieval.
         // Fetch retrieved object.
 
+        /* TODO implement fetchObject
         try {
-             // DEBUG REMOVE
-            long start = System.currentTimeMillis();
             Content content = store.getContent(getSpaceID(group), getContentPrefix(group) + id);
-            // DEBUG REMOVE
-            long elapsed = System.currentTimeMillis() - start;
-            //System.out.println("DC fetch content: " + elapsed);
             size = Long.valueOf(content.getProperties().get(ContentStore.CONTENT_SIZE));
             FileOutputStream out = new FileOutputStream(file);
-            // DEBUG remove
-            start = System.currentTimeMillis();
             InputStream in = content.getStream();
             Utils.copy(in, out);
             in.close();
             out.close();
-             // DEBUG REMOVE
-            elapsed = System.currentTimeMillis() - start;
-            //System.out.println("DC fetch download: " + elapsed);
         } catch (NotFoundException nfE) {
             // no object - no-op
         } catch (ContentStoreException csE) {
             throw new IOException(csE);
         }
+        */
         return size;
     }
 
     @Override
     public boolean objectExists(String group, String id) throws IOException {
+        /* TODO implement objectExists
         try {
             return store.getContentProperties(getSpaceID(group), getContentPrefix(group) + id) != null;
         } catch (NotFoundException nfE) {
@@ -110,12 +124,14 @@ public class APTrustObjectStore implements ObjectStore {
         } catch (ContentStoreException csE) {
             throw new IOException(csE);
         }
+        */ return true;
     }
 
     @Override
     public long removeObject(String group, String id) throws IOException {
         // get metadata before blowing away
         long size = 0L;
+        /* TODO implement removeObject
         try {
             Map<String, String> attrs = store.getContentProperties(getSpaceID(group), getContentPrefix(group) + id);
             size = Long.valueOf(attrs.get(ContentStore.CONTENT_SIZE));
@@ -125,28 +141,81 @@ public class APTrustObjectStore implements ObjectStore {
         } catch (ContentStoreException csE) {
             throw new IOException(csE);
         }
+        */
         return size;
     }
 
     @Override
     public long transferObject(String group, File file) throws IOException {
-        // build bag
-        File bagDir = Files.createTempDirectory(null).toFile();
-        Bag myBag = new Bag(bagDir);
-        myBag.addData("", file.length(), new FileInputStream(file));
-        myBag.close();
-        File bagFile = File.createTempFile("APT", ".tgz");
-        myBag.deflate(bagFile.getAbsolutePath(), "tgz");
-        myBag.empty();
+        SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd");
 
-        // Send it to our S3 bucket.
-        long size = 0L;
+        // Build a bag around the file.
+        File baggingDir = Files.createTempDirectory(null).toFile();
+        String bagName = bucket.substring(0, bucket.lastIndexOf('/'))
+                + '.' + baggingDir.getName();
+        Path bagDir = Paths.get(baggingDir.getPath(), bagName);
+
+        Bag myBag = new Bag(new Version(0, 97));
+        myBag.setFileEncoding(StandardCharsets.UTF_8);
+        myBag.setRootDir(bagDir);
+
+        // Initialize payload manifests.
+        List<SupportedAlgorithm> hashAlgorithms = Arrays.asList(
+                StandardSupportedAlgorithms.MD5,
+                StandardSupportedAlgorithms.SHA256);
+
+        // Add the single payload file to the manifests.
+        Map<Manifest, MessageDigest> hashesMap
+                = Hasher.createManifestToMessageDigestMap(hashAlgorithms);
+        Hasher.hash(file.toPath(), hashesMap);
+
+        myBag.setPayLoadManifests(hashesMap.keySet());
+
+        // We need a bag-info.txt tag file.  LoC Bagit implements this.
+        Metadata bagInfo = new Metadata();
+        bagInfo.add("Source-Organization", "iupui.edu");
+        bagInfo.add("Bagging-Date", dateFormat.format(new Date()));
+        bagInfo.add("Bag-Count", "1 of 1");
+        bagInfo.add("Internal-Sender-Description", "");
+        bagInfo.add("Internal-Sender-Identifier", baggingDir.getName());
+        bagInfo.add("Bag-Group-Identifier", "");
+        myBag.setMetadata(bagInfo);
+
+        // We need an aptrust-info.txt tag file.  Must roll our own.
+        Metadata aptrustInfo = new Metadata();
+        aptrustInfo.add("Title", file.getName());
+        aptrustInfo.add("Description", "Backup by replication task suite");
+        aptrustInfo.add("Access", "Institution");
+        aptrustInfo.add("Storage-Option", "Standard");
+        new FileWriter(new File(bagDir.toFile(), "aptrust-info.txt"))
+                .append(aptrustInfo.toString())
+                .close();
+
+        try {
+            // Create the bag in storage.
+            BagWriter.write(myBag, bagDir);
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IOException("Could not write bag to storage.", ex);
+        }
+
+        // Archive the bag.
+        File bagArchive = new File(baggingDir, bagName + ".tar");
+        try (TarArchiveOutputStream archive
+                = new TarArchiveOutputStream(new FileOutputStream(bagArchive))) {
+            Files.walkFileTree(bagDir, new BagFileVisitor(archive, baggingDir.toPath()));
+
+            ArchiveEntry fileEntry = archive.createArchiveEntry(file,
+                    Paths.get(bagName, "data", file.getName()).toString());
+            archive.putArchiveEntry(fileEntry);
+            file.delete();
+        }
+        Files.delete(bagDir);
+
+        // Send the archive to our S3 bucket.
         String chkSum = Utils.checksum(file, "MD5");
-        size = uploadReplica(group, file, chkSum);
-
-        // delete staging files
-        bagFile.delete();
-        file.delete();
+        long size = uploadReplica(group, bagArchive, chkSum);
+        bagArchive.delete();
+        baggingDir.delete();
 
         return size;
     }
@@ -155,6 +224,7 @@ public class APTrustObjectStore implements ObjectStore {
     public long moveObject(String srcGroup, String destGroup, String id) throws IOException {
         // get file-size metadata before moving the content
         long size = 0L;
+        /* TODO implement moveObject
         try {
             Map<String, String> attrs = store.getContentProperties(getSpaceID(srcGroup),
                     getContentPrefix(srcGroup) + id);
@@ -166,12 +236,14 @@ public class APTrustObjectStore implements ObjectStore {
         } catch (ContentStoreException csE) {
             throw new IOException(csE);
         }
+        */
         return size;
     }
 
     @Override
     public String objectAttribute(String group, String id, String attrName)
             throws IOException {
+        /* TODO implement objectAttribute
         try {
             Map<String, String> attrs = store.getContentProperties(getSpaceID(group),
                     getContentPrefix(group) + id);
@@ -189,6 +261,7 @@ public class APTrustObjectStore implements ObjectStore {
         } catch (ContentStoreException csE) {
             throw new IOException(csE);
         }
+        */ return attrName;
     }
 
     /**
@@ -206,26 +279,17 @@ public class APTrustObjectStore implements ObjectStore {
     private long uploadReplica(String group, File file, String chkSum)
             throws IOException {
         try {
-            String mimeType = "application/octet-stream";
-            if (file.getName().endsWith(".zip")) {
-                mimeType = "application/zip";
-            } else if (file.getName().endsWith(".tgz")) {
-                mimeType = "application/x-gzip";
-            } else if (file.getName().endsWith(".txt")) {
-                mimeType = "text/plain";
-            }
-
             // TODO check whether file is already stored?
-
             Map<String, String> metadata = new HashMap<>();
             metadata.put("checksum", chkSum);
             PutObjectRequest putObjectRequest = PutObjectRequest.builder()
                     .bucket(bucket)
                     .key(makeObjectName(group, file))
-                    .contentType(mimeType)
+                    .contentType("application/tar")
                     .metadata(metadata)
                     .build();
-            PutObjectResponse response = store.putObject(putObjectRequest, file.toPath());
+            PutObjectResponse response = store.putObject(putObjectRequest, file.toPath()); // TODO response?
+            response.
 
             return file.length();
         } catch (AwsServiceException | SdkClientException e) {
@@ -246,5 +310,34 @@ public class APTrustObjectStore implements ObjectStore {
                 .append('/')
                 .append(file.getName())
                 .toString();
+    }
+
+    /**
+     * Add a file to a {@code tar} archive and delete the original file.
+     */
+    class BagFileVisitor
+            extends SimpleFileVisitor<Path> {
+        private final TarArchiveOutputStream archive;
+        private final Path rootDir;
+
+        /**
+         * Capture the archive and root directory for use by {@link visitFile}.
+         * @param archive
+         * @param rootDir
+         */
+        public BagFileVisitor(TarArchiveOutputStream archive, Path rootDir) {
+            this.archive = archive;
+            this.rootDir = rootDir;
+        }
+
+        @Override
+        public FileVisitResult visitFile(Path file, BasicFileAttributes attributes)
+                throws IOException {
+            ArchiveEntry entry = archive.createArchiveEntry(file.toFile(),
+                    file.relativize(rootDir).toString());
+            archive.putArchiveEntry(entry);
+            Files.delete(file);
+            return FileVisitResult.CONTINUE;
+        }
     }
 }
